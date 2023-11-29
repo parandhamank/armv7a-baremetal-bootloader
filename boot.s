@@ -22,256 +22,76 @@
   |                                                 |
   |                   MEMORY MAP                    |
   |                                                 |
-  +-------------------------------------------------+ 0x4002_3000
+  +-------------------------------------------------+ 
   |        Non - Secure User Stack & Heap           |
-  +-------------------------------------------------+ 0x4002_2000
-  |             Non - Secure User Data              |
-  +-------------------------------------------------+ 0x4002_1000
-  |         Non - Secure OS Stack & Heap            |
-  +-------------------------------------------------+ 0x4002_0000
-  |              Non - Secure OS Data               |
-  +-------------------------------------------------+ 0x4001_F000
-  |            Hypervisor Stack & Heap              |
-  +-------------------------------------------------+ 0x4001_E000
-  |                Hypervisor Code                  |
-  +-------------------------------------------------+ 0x4001_D000
-  |              Monitor Stack & Heap               |
-  +-------------------------------------------------+ 0x4001_C000
-  |                  Monitor Data                   |
-  +-------------------------------------------------+ 0x4001_B000
-  |            Secure User Stack & Heap             |
-  +-------------------------------------------------+ 0x4001_A000
-  |                Secure User Data                 |
-  +-------------------------------------------------+ 0x4001_9000
-  |             Secure OS Stack & Heap              |
-  +-------------------------------------------------+ 0x4001_8000
-  |                 Secure OS Data                  |
-  +-------------------------------------------------+ 0x4001_7000
-  |             Non - Secure User Code               |
-  +-------------------------------------------------+ 0x4001_6000
-  |              Non - Secure OS Code               |
-  +-------------------------------------------------+ 0x4001_5000
-  |                Hypervisor Code                  |
-  +-------------------------------------------------+ 0x4001_4000
-  |                  Monitor Code                   |
-  +-------------------------------------------------+ 0x4001_3000
-  |                Secure User Code                 |
-  +-------------------------------------------------+ 0x4001_2000
-  |                 Secure OS Code                  |
-  +-------------------------------------------------+ 0x4001_1000
+  +-------------------------------------------------+
+*/
+
+/*
+  MRC p<coprocessor #>, op1, <Rt>, crn, crm, op2
+  MCR p<coprocessor #>, op1, <Rt>, crn, crm, op2
 */
 
 // Exporting for linker
 .globl _start
+.extern main
 
 .section ".text.boot"
 /*###########################################################################
                           Secure world vector table
 ###########################################################################*/
 _start:
-// TrustZone Vector Table (Secure EL1)
-trustzone_vector_base:
-  LDR PC, =tz_reset_handler
-  LDR PC, =tz_undef_inst_handler
-  LDR PC, =tz_svc_handler
-  LDR PC, =tz_prefetch_abt_handler
-  LDR PC, =tz_data_abt_handler
-  LDR PC, =s_reserved_handler
-  LDR PC, =tz_irq_handler
-  LDR PC, =tz_fiq_handler
-// Monitor Vector Table (Secure EL3)
-monitor_vector_base:
-  LDR PC, =s_reserved_handler
-  LDR PC, =s_reserved_handler
-  LDR PC, =mon_smc_handler
-  LDR PC, =mon_prefetch_abt_handler
-  LDR PC, =mon_data_abt_handler
-  LDR PC, =s_reserved_handler
-  LDR PC, =mon_irq_handler
-  LDR PC, =mon_fiq_handler
+vec_start:
+  ldr pc, =reset_handler
+  ldr pc, =undef_inst_handler
+  ldr pc, =svc_handler
+  ldr pc, =pref_abt_handler
+  ldr pc, =data_abt_handler
+  nop
+  ldr pc, =irq_handler
+  ldr pc, =fiq_handler
+vec_end:
 
-/*---------------------------------------------------------------------------
-                Secure Code (EL1) (Secure Operating System)
----------------------------------------------------------------------------*/
-tz_reset_handler:
-  // Setup Vector base address
-  LDR r0, =trustzone_vector_base
-  MCR p15, 0, r0, c12, c0, 0 // Write r0 to Secure copy of VBAR
 
-  // Setup Stack
-  LDR r0, =secure_el1_stack
-  mov sp, r0
-  b .
-tz_svc_handler:
-  b .
-tz_undef_inst_handler:
-  b .
-tz_prefetch_abt_handler:
-  b .
-tz_data_abt_handler:
-  b . 
-tz_irq_handler:
-  b .
-tz_fiq_handler:
-  b .
-s_reserved_handler:
-  b .
+reset_handler:
+  ldr r0, =vec_start
+  mcr p15, 0, r0, c12, c0, 0 // Setup VBAR
+  ldr r13, =top_of_stack // Setup SP
+  bl enable_cache
+  bl main
+  
+  ldr r0, =memory_buffer
+  mov r1, #0x10
+  str r1, [r0]
 
-// 4KB alignemnt
-.align 4
-.align 8
+  svc #1
+  mov r1, #3
+end_loop:
+  b end_loop
 
-/*---------------------------------------------------------------------------
-                  Secure Code (EL1) (Secure Application)
----------------------------------------------------------------------------*/
+undef_inst_handler:
+  b undef_inst_handler
+svc_handler:
+  b svc_handler
+pref_abt_handler:
+  b pref_abt_handler
+data_abt_handler:
+  b data_abt_handler
+irq_handler:
+  b irq_handler
+fiq_handler:
+  b fiq_handler
 
-// 4KB alignemnt
-.align 4
-.align 8
+enable_cache:
+  // Set 3rd bit of System Control Register (SCTLR)
+  mrc p15, 0, r0, c1, c0, 0
+  orr r0, r0, #0x4
+  mcr p15, 0, r0, c1, c0, 0
+  mov pc, lr
 
-/*---------------------------------------------------------------------------
-                              Monitor Code (EL3)
----------------------------------------------------------------------------*/
-mon_smc_handler:
-  b .
-mon_prefetch_abt_handler:
-  b .
-mon_data_abt_handler:
-  b .
-mon_irq_handler:
-  b .
-mon_fiq_handler:
-  b .
+.section .data
+stack_end:
+    .space 4096    // Adjust the size of the stack as needed
+top_of_stack:
 
-// 4KB alignemnt
-.align 4
-.align 8
-
-/*###########################################################################
-                        Non - Secure world vector table
-###########################################################################*/
-// Hypervisor Vector (Non-Secure EL2)
-hypervisor_vector_base:
-  LDR PC, =ns_reserved_handler
-  LDR PC, =hyp_undef_inst_handler
-  LDR PC, =hyp_svc_handler
-  LDR PC, =hyp_prefetch_abt_handler
-  LDR PC, =hyp_data_abt_handler
-  LDR PC, =hyp_trap_handler
-  LDR PC, =hyp_irq_handler
-  LDR PC, =hyp_fiq_handler
-// Non_Secure Vector Table (Non-Secure EL1)
-non_secure_vector_base:
-  LDR PC, =ns_reserved_handler
-  LDR PC, =non_sec_undef_inst_handler
-  LDR PC, =non_sec_svc_handler
-  LDR PC, =non_sec_prefetch_abt_handler
-  LDR PC, =non_sec_data_abt_handler
-  LDR PC, =ns_reserved_handler
-  LDR PC, =non_sec_irq_handler
-  LDR PC, =non_sec_fiq_handler
-
-/*---------------------------------------------------------------------------
-                              Hypervisor Code (EL2)
----------------------------------------------------------------------------*/
-hyp_undef_inst_handler:
-  b .
-hyp_svc_handler:
-  b .
-hyp_prefetch_abt_handler:
-  b .
-hyp_data_abt_handler:
-  b .
-hyp_trap_handler:
-  b .
-hyp_irq_handler:
-  b .
-hyp_fiq_handler:
-  b .
-
-// 4KB alignemnt
-.align 4
-.align 8
-
-/*---------------------------------------------------------------------------
-                    Non_secure Code (EL1) (Operating system)
----------------------------------------------------------------------------*/
-non_sec_undef_inst_handler:
-  b .
-non_sec_svc_handler:
-  b .
-non_sec_prefetch_abt_handler:
-  b .
-non_sec_data_abt_handler:
-  b .
-non_sec_irq_handler:
-  b .
-non_sec_fiq_handler:
-  b .
-
-ns_reserved_handler:
-  b .
-
-// 4KB alignemnt
-.align 4
-.align 8
-
-/*---------------------------------------------------------------------------
-                    Non_secure Code (EL0) (User Application)
----------------------------------------------------------------------------*/
-
-// 4KB alignemnt
-.align 4
-.align 8
-
-/*---------------------------------------------------------------------------
-                         Data and Stack Segment
----------------------------------------------------------------------------*/
-.section ".data"
-/* Secure EL1 */
-secure_el1_data:
-.align 4
-.align 8
-.align 4
-.align 8
-secure_el1_stack:
-
-/* Secure EL0 */
-secure_el0_data:
-.align 4
-.align 8
-.align 4
-.align 8
-secure_el0_stack:
-
-/* Secure mon */
-secure_mon_data:
-.align 4
-.align 8
-.align 4
-.align 8
-secure_mon_stack:
-
-/* Non-Secure EL2 */
-non_secure_el2_data:
-.align 4
-.align 8
-.align 4
-.align 8
-non_secure_el2_stack:
-
-/* Non-Secure EL1 */
-non_secure_el1_data:
-.align 4
-.align 8
-.align 4
-.align 8
-non_secure_el1_stack:
-
-/* Non-Secure EL0 */
-non_secure_el0_data:
-.align 4
-.align 8
-.align 4
-.align 8
-non_secure_el0_stack:
+memory_buffer:

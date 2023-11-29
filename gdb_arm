@@ -1,0 +1,8 @@
+target remote localhost:1234
+set pagination off
+focus cmd
+symbol-file kernel.elf
+break _start
+continue
+layout src
+tui reg cp_regs

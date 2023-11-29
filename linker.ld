@@ -8,4 +8,7 @@ SECTIONS {
   .text : {
     *(.text.boot)
   }
+  .data : {
+    
+  }
 }
