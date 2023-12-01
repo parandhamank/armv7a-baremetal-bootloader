@@ -32,7 +32,7 @@
   MCR p<coprocessor #>, op1, <Rt>, crn, crm, op2
 */
 
-// Exporting for linker
+// Exporting symbols
 .globl _start
 .extern main
 
@@ -41,25 +41,50 @@
                           Secure world vector table
 ###########################################################################*/
 _start:
-vec_start:
-  ldr pc, =reset_handler
-  ldr pc, =undef_inst_handler
-  ldr pc, =svc_handler
-  ldr pc, =pref_abt_handler
-  ldr pc, =data_abt_handler
-  nop
-  ldr pc, =irq_handler
-  ldr pc, =fiq_handler
-vec_end:
-
+	.balign 0x20
+vector_table_base_address:
+	b reset_handler
+	b undefined_inst_handler
+	b svc_handler
+	b prefetch_abt_handler
+	b data_abt_handler
+	NOP 
+	b irq_handler
+  // fiq handler code here
 
 reset_handler:
-  ldr r0, =vec_start
+  // Clear all the registers of supervisor mode
+  mov r0,  #0
+  mov r1,  #0
+  mov r2,  #0
+  mov r3,  #0
+  mov r4,  #0
+  mov r5,  #0
+  mov r6,  #0
+  mov r7,  #0
+  mov r8,  #0
+  mov r9,  #0
+  mov r10, #0
+  mov r11, #0
+  mov r12, #0
+  mov r13, #0
+  mov r14, #0
+
+  ldr r0, =vector_table_base_address
   mcr p15, 0, r0, c12, c0, 0 // Setup VBAR
-  ldr r13, =top_of_stack // Setup SP
+
+  // Setup stack for supervisor mode
+  ldr r13, =svc_sp // Setup SP
+
+  // Clear all the register for other PL1 modes and setup stacks for them
+  bl reset_gen_regs
+
+  // The content in cache ram is invalid after the reset, so you must perform invalidation operations to initialize them
+  bl disable_d_and_unified_cache
+  bl invalidate_l1_dcache
   bl enable_cache
   bl main
-  
+
   ldr r0, =memory_buffer
   mov r1, #0x10
   str r1, [r0]
@@ -69,18 +94,76 @@ reset_handler:
 end_loop:
   b end_loop
 
-undef_inst_handler:
-  b undef_inst_handler
+undefined_inst_handler:
+  b undefined_inst_handler
 svc_handler:
   b svc_handler
-pref_abt_handler:
-  b pref_abt_handler
+prefetch_abt_handler:
+  b prefetch_abt_handler
 data_abt_handler:
   b data_abt_handler
 irq_handler:
   b irq_handler
-fiq_handler:
-  b fiq_handler
+
+invalidate_l1_dcache:
+  /*
+    Steps to invalidate L1 Data cache
+      - Set L1 data cache in CSSELR (Cache Size Selection Register)
+   */
+  
+disable_d_and_unified_cache:
+  /*
+    We have to update the 3rd bit of the System control register (SCTLR)
+   */
+  mrc p15, 0, r0, c1, c0, 0
+  bic r0, r0, #0x4 // Clear 3rd bit --> Data and unified caches are disabled
+  mrc p15, 0, r0, c1, c0, 0
+  dsb
+  isb
+  mov pc, lr
+
+reset_gen_regs:
+  // Change to FIQ mode
+  cps #0x11
+  mov r8,  #0
+  mov r9,  #0
+  mov r10, #0
+  mov r11, #0
+  mov r12, #0
+  ldr r13, =fiq_sp
+  mov r14, #0
+
+  // Change to IRQ mode
+  cps #0x12
+  ldr r13, =irq_sp
+  mov r14, #0
+
+  // Change to System mode
+  cps #0x1F
+  ldr r13, =sys_sp
+  mov r14, #0
+
+  // Change to Abort mode
+  cps #0x17
+  ldr r13, =data_abt_sp
+  mov r14, #0
+
+  // Change to Undef mode
+  cps #0x1B
+  ldr r13, =undefined_inst_sp
+  mov r14, #0
+
+  // Change to Undef mode
+  cps #0x13
+  mov pc, lr
+
+isVMSAsupport:
+  MRC p15, 0, r0, c0, c1, 4 // Read Memory Model Feature Register 0
+  and r0, r0, #0xf
+  cmp r0, #5
+  moveq r0, #1
+  movne r0, #0
+  mov pc, lr
 
 enable_cache:
   // Set 3rd bit of System Control Register (SCTLR)
@@ -91,7 +174,20 @@ enable_cache:
 
 .section .data
 stack_end:
-    .space 4096    // Adjust the size of the stack as needed
-top_of_stack:
+  .space 4096    // Adjust the size of the stack as needed
+undefined_inst_sp:
+  .space 4096    // Adjust the size of the stack as needed
+svc_sp:
+  .space 4096    // Adjust the size of the stack as needed
+prefetch_abt_sp:
+  .space 4096    // Adjust the size of the stack as needed
+data_abt_sp:
+  .space 4096    // Adjust the size of the stack as needed
+irq_sp:
+  .space 4096    // Adjust the size of the stack as needed
+fiq_sp:
+  .space 4096    // Adjust the size of the stack as needed
+sys_sp:
+stack_start:
 
 memory_buffer:
